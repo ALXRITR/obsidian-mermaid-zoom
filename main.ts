@@ -126,19 +126,18 @@ export default class MermaidZoomPlugin extends Plugin {
 
 		// Get SVG dimensions for initial container sizing
 		const initialSvgRect = svg.getBoundingClientRect();
-		const initialSvgWidth = initialSvgRect.width || 300;
 		const initialSvgHeight = initialSvgRect.height || 200;
 
-		// Calculate initial container size - max height equals width (square)
-		const containerWidth = Math.min(initialSvgWidth + 32, targetParent.clientWidth || 600);
-		const containerHeight = Math.min(initialSvgHeight + 60, containerWidth); // height <= width
+		// Container height: based on SVG aspect ratio, capped reasonably
+		const parentWidth = targetParent.clientWidth || 600;
+		const containerHeight = Math.min(initialSvgHeight + 60, parentWidth);
 
 		// Create zoom container
 		const container = createDiv('mermaid-zoom-container');
 		container.style.cssText = `
 			position: relative;
 			overflow: hidden;
-			width: ${containerWidth}px;
+			width: 100%;
 			height: ${containerHeight}px;
 			min-width: 150px;
 			min-height: 100px;
@@ -217,10 +216,16 @@ export default class MermaidZoomPlugin extends Plugin {
 		const scaleY = availableHeight / svgHeight;
 		const fitScale = Math.min(scaleX, scaleY, 1); // Don't scale up beyond 100%
 
-		// Apply the scale
+		// Center the SVG in the container
+		const scaledWidth = svgWidth * fitScale;
+		const scaledHeight = svgHeight * fitScale;
+		const centerX = (container.clientWidth - scaledWidth) / 2;
+		const centerY = (container.clientHeight - bottomPadding - scaledHeight) / 2;
+
+		// Apply the scale and center
 		state.scale = fitScale;
-		state.translateX = 0;
-		state.translateY = 0;
+		state.translateX = centerX;
+		state.translateY = Math.max(0, centerY);
 		this.updateTransform(contentWrapper, state);
 	}
 
