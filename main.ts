@@ -807,15 +807,12 @@ export default class MermaidZoomPlugin extends Plugin {
 	}
 
 	private addDragPan(container: HTMLElement, contentWrapper: HTMLElement, state: ZoomState) {
-		// Set initial cursor state
-		contentWrapper.classList.add('mermaid-zoom-content');
-
 		container.addEventListener('mousedown', (e) => {
 			if (e.button === 0) { // Left mouse button
 				state.isDragging = true;
 				state.startX = e.clientX - state.translateX;
 				state.startY = e.clientY - state.translateY;
-				contentWrapper.addClass('dragging');
+				container.addClass('is-dragging');
 			}
 		});
 
@@ -831,7 +828,7 @@ export default class MermaidZoomPlugin extends Plugin {
 		document.addEventListener('mouseup', () => {
 			if (state.isDragging) {
 				state.isDragging = false;
-				contentWrapper.removeClass('dragging');
+				container.removeClass('is-dragging');
 			}
 		});
 	}

@@ -5,13 +5,14 @@
 	display: block;
 }
 
-/* Container cursor states */
-.mermaid-zoom-content {
+/* Container and content cursor states */
+.mermaid-zoom-container {
 	cursor: grab;
 }
 
-.mermaid-zoom-content.dragging {
-	cursor: grabbing;
+.mermaid-zoom-container.is-dragging,
+.mermaid-zoom-container.is-dragging .mermaid-zoom-content {
+	cursor: grabbing !important;
 }
 
 /* Resizing cursor states */
