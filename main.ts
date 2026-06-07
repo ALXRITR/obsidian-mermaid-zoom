@@ -1,4 +1,18 @@
-import { Plugin } from 'obsidian';
+import { App, Plugin, PluginSettingTab, Setting } from 'obsidian';
+
+interface MermaidZoomSettings {
+	requireModifierForZoom: boolean;
+	showControlsOnHover: boolean;
+	customContainerCSS: string;
+	customMermaidCSS: string;
+}
+
+const DEFAULT_SETTINGS: MermaidZoomSettings = {
+	requireModifierForZoom: true,
+	showControlsOnHover: true,
+	customContainerCSS: '',
+	customMermaidCSS: ''
+};
 
 interface ZoomState {
 	scale: number;
@@ -18,6 +32,7 @@ interface ZoomState {
 }
 
 export default class MermaidZoomPlugin extends Plugin {
+	settings: MermaidZoomSettings = DEFAULT_SETTINGS;
 	private readonly zoomStates = new Map<HTMLElement, ZoomState>();
 	private readonly defaultMinScale = 0.1;
 	private readonly defaultMaxScale = 5;
@@ -25,9 +40,16 @@ export default class MermaidZoomPlugin extends Plugin {
 	private mutationObserver?: MutationObserver;
 	private resizeObserver?: ResizeObserver;
 	private processedElements = new WeakSet<SVGSVGElement>();
+	private customStyleEl?: HTMLStyleElement;
 
-	onload() {
+	async onload() {
 		console.debug('Loading Mermaid Zoom plugin');
+
+		await this.loadSettings();
+		this.addSettingTab(new MermaidZoomSettingTab(this.app, this));
+
+		// Inject custom CSS
+		this.injectCustomCSS();
 
 		// Set up observers
 		this.setupMutationObserver();
@@ -53,6 +75,58 @@ export default class MermaidZoomPlugin extends Plugin {
 			// Delay to allow mermaid to render
 			setTimeout(() => this.processAllMermaidDiagrams(), 200);
 		}));
+	}
+
+	async loadSettings() {
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+	}
+
+	async saveSettings() {
+		await this.saveData(this.settings);
+		this.injectCustomCSS();
+	}
+
+	private injectCustomCSS() {
+		// Remove existing custom style element
+		if (this.customStyleEl) {
+			this.customStyleEl.remove();
+			this.customStyleEl = undefined;
+		}
+
+		const parts: string[] = [];
+
+		// Hover-only controls
+		if (this.settings.showControlsOnHover) {
+			parts.push(`
+.mermaid-zoom-container .mermaid-zoom-controls {
+	opacity: 0;
+	transition: opacity 0.2s ease;
+	pointer-events: none;
+}
+.mermaid-zoom-container:hover .mermaid-zoom-controls {
+	opacity: 1;
+	pointer-events: auto;
+}
+			`);
+		}
+
+		// Custom container CSS
+		if (this.settings.customContainerCSS.trim()) {
+			parts.push(`.mermaid-zoom-container { ${this.settings.customContainerCSS} }`);
+		}
+
+		// Custom mermaid CSS
+		if (this.settings.customMermaidCSS.trim()) {
+			parts.push(`.mermaid-zoom-container .mermaid { ${this.settings.customMermaidCSS} }`);
+			parts.push(`.mermaid-zoom-container svg { ${this.settings.customMermaidCSS} }`);
+		}
+
+		if (parts.length > 0) {
+			this.customStyleEl = document.createElement('style');
+			this.customStyleEl.id = 'mermaid-zoom-custom-styles';
+			this.customStyleEl.textContent = parts.join('\n');
+			document.head.appendChild(this.customStyleEl);
+		}
 	}
 
 	private setupResizeObserver() {
@@ -423,8 +497,8 @@ export default class MermaidZoomPlugin extends Plugin {
 		// Add modal to document
 		document.body.appendChild(modal);
 
-		// Add zoom/pan interactions to modal
-		this.addWheelZoom(modalZoomContainer, modalContentWrapper, modalState);
+		// Add zoom/pan interactions to modal (no modifier required in modal)
+		this.addWheelZoom(modalZoomContainer, modalContentWrapper, modalState, false);
 		this.addDragPan(modalZoomContainer, modalContentWrapper, modalState);
 		this.addTouchGestures(modalZoomContainer, modalContentWrapper, modalState);
 
@@ -699,8 +773,16 @@ export default class MermaidZoomPlugin extends Plugin {
 		});
 	}
 
-	private addWheelZoom(container: HTMLElement, contentWrapper: HTMLElement, state: ZoomState) {
+	private addWheelZoom(container: HTMLElement, contentWrapper: HTMLElement, state: ZoomState, respectModifier = true) {
 		container.addEventListener('wheel', (e) => {
+			// Check if modifier key is required
+			if (respectModifier && this.settings.requireModifierForZoom) {
+				if (!e.ctrlKey && !e.metaKey) {
+					// Let the event propagate for normal scrolling
+					return;
+				}
+			}
+
 			e.preventDefault();
 
 			const rect = container.getBoundingClientRect();
@@ -852,7 +934,84 @@ export default class MermaidZoomPlugin extends Plugin {
 			this.resizeObserver.disconnect();
 		}
 
+		// Remove custom styles
+		if (this.customStyleEl) {
+			this.customStyleEl.remove();
+		}
+
 		this.zoomStates.clear();
 		this.processedElements = new WeakSet();
+	}
+}
+
+class MermaidZoomSettingTab extends PluginSettingTab {
+	plugin: MermaidZoomPlugin;
+
+	constructor(app: App, plugin: MermaidZoomPlugin) {
+		super(app, plugin);
+		this.plugin = plugin;
+	}
+
+	display(): void {
+		const { containerEl } = this;
+		containerEl.empty();
+
+		// --- Behavior ---
+		new Setting(containerEl)
+			.setName('Require Ctrl/Cmd for scroll zoom')
+			.setDesc('When enabled, scrolling over a diagram only zooms while holding Ctrl (Windows/Linux) or Cmd (Mac). Prevents accidental zoom while scrolling the note.')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.requireModifierForZoom)
+				.onChange(async (value) => {
+					this.plugin.settings.requireModifierForZoom = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Show controls on hover only')
+			.setDesc('Hide the zoom/reset/fullscreen controls until you hover over the diagram.')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.showControlsOnHover)
+				.onChange(async (value) => {
+					this.plugin.settings.showControlsOnHover = value;
+					await this.plugin.saveSettings();
+				}));
+
+		// --- Custom CSS ---
+		containerEl.createEl('h3', { text: 'Custom CSS' });
+
+		new Setting(containerEl)
+			.setName('Container CSS')
+			.setDesc('Custom CSS properties applied to the zoom container (e.g. background, border-radius, border).')
+			.addTextArea(text => {
+				text.inputEl.style.width = '100%';
+				text.inputEl.style.height = '100px';
+				text.inputEl.style.fontFamily = 'var(--font-monospace)';
+				text.inputEl.style.fontSize = '12px';
+				text
+					.setPlaceholder('background: transparent;\nborder: none;\nborder-radius: 0;')
+					.setValue(this.plugin.settings.customContainerCSS)
+					.onChange(async (value) => {
+						this.plugin.settings.customContainerCSS = value;
+						await this.plugin.saveSettings();
+					});
+			});
+
+		new Setting(containerEl)
+			.setName('Mermaid diagram CSS')
+			.setDesc('Custom CSS properties applied to the Mermaid SVG inside the container (e.g. font-size, color overrides).')
+			.addTextArea(text => {
+				text.inputEl.style.width = '100%';
+				text.inputEl.style.height = '100px';
+				text.inputEl.style.fontFamily = 'var(--font-monospace)';
+				text.inputEl.style.fontSize = '12px';
+				text
+					.setPlaceholder('font-size: 14px;')
+					.setValue(this.plugin.settings.customMermaidCSS)
+					.onChange(async (value) => {
+						this.plugin.settings.customMermaidCSS = value;
+						await this.plugin.saveSettings();
+					});
+			});
 	}
 }
