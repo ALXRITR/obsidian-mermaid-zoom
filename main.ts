@@ -775,27 +775,33 @@ export default class MermaidZoomPlugin extends Plugin {
 
 	private addWheelZoom(container: HTMLElement, contentWrapper: HTMLElement, state: ZoomState, respectModifier = true) {
 		container.addEventListener('wheel', (e) => {
-			// Check if modifier key is required
-			if (respectModifier && this.settings.requireModifierForZoom) {
-				if (!e.ctrlKey && !e.metaKey) {
-					// Let the event propagate for normal scrolling
-					return;
-				}
+			// Chromium/Electron reports trackpad pinch-zoom as a wheel event
+			// with ctrlKey === true. Treat that as an always-on zoom gesture.
+			const isPinch = e.ctrlKey;
+			const hasModifier = e.ctrlKey || e.metaKey;
+
+			// Mouse-wheel scroll without a modifier: let the note scroll
+			// normally (when the setting requires a modifier). Pinch always zooms.
+			if (respectModifier && this.settings.requireModifierForZoom && !hasModifier) {
+				return;
 			}
 
 			e.preventDefault();
+			e.stopPropagation();
 
 			const rect = container.getBoundingClientRect();
 			const mouseX = e.clientX - rect.left;
 			const mouseY = e.clientY - rect.top;
 
-			const delta = e.deltaY > 0 ? 0.9 : 1.1;
+			// Smooth, proportional zoom for both mouse wheel and trackpad pinch.
+			// Pinch deltas are small floats; wheel deltas are larger steps.
+			const intensity = isPinch ? 0.01 : 0.0015;
 			const oldScale = state.scale;
-			let newScale = oldScale * delta;
+			let newScale = oldScale * Math.exp(-e.deltaY * intensity);
 			newScale = Math.max(state.minScale, Math.min(state.maxScale, newScale));
 
 			if (newScale !== oldScale) {
-				// Adjust translation to zoom toward mouse position
+				// Adjust translation to zoom toward cursor position
 				const scaleRatio = newScale / oldScale;
 				state.translateX = mouseX - (mouseX - state.translateX) * scaleRatio;
 				state.translateY = mouseY - (mouseY - state.translateY) * scaleRatio;
@@ -809,6 +815,8 @@ export default class MermaidZoomPlugin extends Plugin {
 	private addDragPan(container: HTMLElement, contentWrapper: HTMLElement, state: ZoomState) {
 		container.addEventListener('mousedown', (e) => {
 			if (e.button === 0) { // Left mouse button
+				// Prevent text/SVG selection from hijacking the drag
+				e.preventDefault();
 				state.isDragging = true;
 				state.startX = e.clientX - state.translateX;
 				state.startY = e.clientY - state.translateY;
