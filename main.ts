@@ -5,13 +5,15 @@ interface MermaidZoomSettings {
 	showControlsOnHover: boolean;
 	customContainerCSS: string;
 	customMermaidCSS: string;
+	customThemeCSS: string;   // raw CSS, injected verbatim (user provides selectors)
 }
 
 const DEFAULT_SETTINGS: MermaidZoomSettings = {
 	requireModifierForZoom: true,
 	showControlsOnHover: true,
 	customContainerCSS: '',
-	customMermaidCSS: ''
+	customMermaidCSS: '',
+	customThemeCSS: ''
 };
 
 interface ZoomState {
@@ -119,6 +121,12 @@ export default class MermaidZoomPlugin extends Plugin {
 		if (this.settings.customMermaidCSS.trim()) {
 			parts.push(`.mermaid-zoom-container .mermaid { ${this.settings.customMermaidCSS} }`);
 			parts.push(`.mermaid-zoom-container svg { ${this.settings.customMermaidCSS} }`);
+		}
+
+		// Full custom theme CSS (verbatim, user provides own selectors). Last on purpose:
+		// keeps malformed theme CSS from breaking the functional blocks above.
+		if (this.settings.customThemeCSS.trim()) {
+			parts.push(this.settings.customThemeCSS);
 		}
 
 		if (parts.length > 0) {
@@ -1015,6 +1023,23 @@ class MermaidZoomSettingTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.customMermaidCSS)
 					.onChange(async (value) => {
 						this.plugin.settings.customMermaidCSS = value;
+						await this.plugin.saveSettings();
+					});
+			});
+
+		new Setting(containerEl)
+			.setName('Theme CSS (advanced)')
+			.setDesc('Full CSS rules, injected verbatim. Write your own selectors and scope them to .mermaid-zoom-container / svg.flowchart so only zoomed diagrams are affected. Use !important to override Mermaid inline styles. Lets you apply and freely edit a complete diagram theme (nodes, edges, decision shapes, labels) without a global CSS snippet.')
+			.addTextArea(text => {
+				text.inputEl.style.width = '100%';
+				text.inputEl.style.height = '220px';
+				text.inputEl.style.fontFamily = 'var(--font-monospace)';
+				text.inputEl.style.fontSize = '12px';
+				text
+					.setPlaceholder('.mermaid-zoom-container svg.flowchart .node rect {\n  fill: #fff !important;\n  stroke: #004994 !important;\n}')
+					.setValue(this.plugin.settings.customThemeCSS)
+					.onChange(async (value) => {
+						this.plugin.settings.customThemeCSS = value;
 						await this.plugin.saveSettings();
 					});
 			});
