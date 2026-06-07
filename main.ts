@@ -3,6 +3,14 @@ import { App, Plugin, PluginSettingTab, Setting } from 'obsidian';
 interface MermaidZoomSettings {
 	requireModifierForZoom: boolean;
 	showControlsOnHover: boolean;
+	// Container appearance (live-editable)
+	containerPadding: string;
+	containerMargin: string;
+	containerBackground: string;
+	containerBorderRadius: string;
+	containerBorder: string;
+	containerBorderHover: string;
+	// Advanced raw CSS
 	customContainerCSS: string;
 	customMermaidCSS: string;
 	customThemeCSS: string;   // raw CSS, injected verbatim (user provides selectors)
@@ -11,6 +19,12 @@ interface MermaidZoomSettings {
 const DEFAULT_SETTINGS: MermaidZoomSettings = {
 	requireModifierForZoom: true,
 	showControlsOnHover: true,
+	containerPadding: '1em',
+	containerMargin: '1em',
+	containerBackground: 'var(--background-secondary)',
+	containerBorderRadius: '8px',
+	containerBorder: '1px solid var(--background-modifier-border)',
+	containerBorderHover: '',
 	customContainerCSS: '',
 	customMermaidCSS: '',
 	customThemeCSS: ''
@@ -86,6 +100,14 @@ export default class MermaidZoomPlugin extends Plugin {
 	async saveSettings() {
 		await this.saveData(this.settings);
 		this.injectCustomCSS();
+		// Re-fit existing diagrams after the new CSS (e.g. padding) is applied.
+		requestAnimationFrame(() => this.refitAll());
+	}
+
+	private refitAll() {
+		for (const [contentWrapper, state] of this.zoomStates) {
+			this.fitToContainer(state.container, contentWrapper, state.svg, state);
+		}
 	}
 
 	private injectCustomCSS() {
@@ -96,6 +118,26 @@ export default class MermaidZoomPlugin extends Plugin {
 		}
 
 		const parts: string[] = [];
+
+		// Base container appearance (from settings). First so that the advanced
+		// custom-CSS fields below can still override these defaults.
+		// padding-bottom adds room for the controls bar on top of the chosen padding.
+		parts.push(`
+.mermaid-zoom-container {
+	background: ${this.settings.containerBackground};
+	border: ${this.settings.containerBorder};
+	border-radius: ${this.settings.containerBorderRadius};
+	margin: ${this.settings.containerMargin} 0;
+	padding: ${this.settings.containerPadding};
+	padding-bottom: calc(${this.settings.containerPadding} + 1.5em);
+	transition: border-color 0.15s ease, border 0.15s ease;
+}
+		`);
+
+		// Border on hover (optional)
+		if (this.settings.containerBorderHover.trim()) {
+			parts.push(`.mermaid-zoom-container:hover { border: ${this.settings.containerBorderHover}; }`);
+		}
 
 		// Hover-only controls
 		if (this.settings.showControlsOnHover) {
@@ -230,7 +272,9 @@ export default class MermaidZoomPlugin extends Plugin {
 		const parentWidth = targetParent.clientWidth || 600;
 		const containerHeight = Math.min(initialSvgHeight + 60, parentWidth);
 
-		// Create zoom container
+		// Create zoom container. Only functional/layout styles are inline here;
+		// appearance (padding, margin, background, border) comes from the
+		// injected .mermaid-zoom-container rule so it stays live-editable.
 		const container = createDiv('mermaid-zoom-container');
 		container.style.cssText = `
 			position: relative;
@@ -239,12 +283,6 @@ export default class MermaidZoomPlugin extends Plugin {
 			height: ${containerHeight}px;
 			min-width: 150px;
 			min-height: 100px;
-			background: var(--background-secondary);
-			border-radius: 8px;
-			border: 1px solid var(--background-modifier-border);
-			margin: 1em 0;
-			padding: 1em;
-			padding-bottom: 2.5em;
 			box-sizing: border-box;
 		`;
 
@@ -302,11 +340,15 @@ export default class MermaidZoomPlugin extends Plugin {
 	}
 
 	private fitToContainer(container: HTMLElement, contentWrapper: HTMLElement, svg: SVGSVGElement, state: ZoomState) {
-		// Get available space (account for padding)
-		const containerPadding = 16; // 1em padding
-		const bottomPadding = 40; // extra padding for controls
-		const availableWidth = container.clientWidth - containerPadding * 2;
-		const availableHeight = container.clientHeight - containerPadding - bottomPadding;
+		// Get available space using the real computed padding, so a custom
+		// container padding from settings doesn't break the fit calculation.
+		const cs = getComputedStyle(container);
+		const padLeft = parseFloat(cs.paddingLeft) || 0;
+		const padRight = parseFloat(cs.paddingRight) || 0;
+		const padTop = parseFloat(cs.paddingTop) || 0;
+		const padBottom = parseFloat(cs.paddingBottom) || 0;
+		const availableWidth = container.clientWidth - padLeft - padRight;
+		const availableHeight = container.clientHeight - padTop - padBottom;
 
 		// Use saved original SVG dimensions
 		const svgWidth = state.svgOriginalWidth;
@@ -987,6 +1029,75 @@ class MermaidZoomSettingTab extends PluginSettingTab {
 				.setValue(this.plugin.settings.showControlsOnHover)
 				.onChange(async (value) => {
 					this.plugin.settings.showControlsOnHover = value;
+					await this.plugin.saveSettings();
+				}));
+
+		// --- Appearance ---
+		containerEl.createEl('h3', { text: 'Appearance' });
+
+		new Setting(containerEl)
+			.setName('Inner padding')
+			.setDesc('Space between the container edge and the diagram. Single CSS value (e.g. 1em, 12px). Room for the controls bar is added automatically.')
+			.addText(text => text
+				.setPlaceholder('1em')
+				.setValue(this.plugin.settings.containerPadding)
+				.onChange(async (value) => {
+					this.plugin.settings.containerPadding = value || DEFAULT_SETTINGS.containerPadding;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Vertical margin')
+			.setDesc('Space above and below the container. Single CSS value (e.g. 1em, 16px).')
+			.addText(text => text
+				.setPlaceholder('1em')
+				.setValue(this.plugin.settings.containerMargin)
+				.onChange(async (value) => {
+					this.plugin.settings.containerMargin = value || DEFAULT_SETTINGS.containerMargin;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Background')
+			.setDesc('Container background. Any CSS color or variable (e.g. var(--background-secondary), transparent, #1e1e1e).')
+			.addText(text => text
+				.setPlaceholder('var(--background-secondary)')
+				.setValue(this.plugin.settings.containerBackground)
+				.onChange(async (value) => {
+					this.plugin.settings.containerBackground = value || DEFAULT_SETTINGS.containerBackground;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Border radius')
+			.setDesc('Corner rounding of the container. Single CSS value (e.g. 8px, 0).')
+			.addText(text => text
+				.setPlaceholder('8px')
+				.setValue(this.plugin.settings.containerBorderRadius)
+				.onChange(async (value) => {
+					this.plugin.settings.containerBorderRadius = value || DEFAULT_SETTINGS.containerBorderRadius;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Border')
+			.setDesc('Container border. Full CSS border shorthand (e.g. 1px solid var(--background-modifier-border), none).')
+			.addText(text => text
+				.setPlaceholder('1px solid var(--background-modifier-border)')
+				.setValue(this.plugin.settings.containerBorder)
+				.onChange(async (value) => {
+					this.plugin.settings.containerBorder = value || DEFAULT_SETTINGS.containerBorder;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Border on hover')
+			.setDesc('Optional border shown only while hovering the diagram. Leave empty to disable. Full CSS border shorthand (e.g. 1px solid var(--interactive-accent)).')
+			.addText(text => text
+				.setPlaceholder('1px solid var(--interactive-accent)')
+				.setValue(this.plugin.settings.containerBorderHover)
+				.onChange(async (value) => {
+					this.plugin.settings.containerBorderHover = value;
 					await this.plugin.saveSettings();
 				}));
 
