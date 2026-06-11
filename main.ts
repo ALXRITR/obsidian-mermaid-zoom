@@ -45,6 +45,9 @@ interface ZoomState {
 	// Original SVG dimensions (saved once)
 	svgOriginalWidth: number;
 	svgOriginalHeight: number;
+	// True once the user has dragged the bottom edge to set a manual height.
+	// While false, the container height auto-fits the diagram (fit-to-content).
+	userResizedHeight: boolean;
 }
 
 export default class MermaidZoomPlugin extends Plugin {
@@ -268,9 +271,9 @@ export default class MermaidZoomPlugin extends Plugin {
 		const initialSvgRect = svg.getBoundingClientRect();
 		const initialSvgHeight = initialSvgRect.height || 200;
 
-		// Container height: based on SVG aspect ratio, capped reasonably
-		const parentWidth = targetParent.clientWidth || 600;
-		const containerHeight = Math.min(initialSvgHeight + 60, parentWidth);
+		// Rough initial height; fitToContainer() corrects it to fit-to-content
+		// synchronously right after the container is inserted.
+		const containerHeight = initialSvgHeight + 60;
 
 		// Create zoom container. Only functional/layout styles are inline here;
 		// appearance (padding, margin, background, border) comes from the
@@ -316,7 +319,8 @@ export default class MermaidZoomPlugin extends Plugin {
 			svg: svg,
 			container: container,
 			svgOriginalWidth: svgOriginalWidth,
-			svgOriginalHeight: svgOriginalHeight
+			svgOriginalHeight: svgOriginalHeight,
+			userResizedHeight: false
 		};
 		this.zoomStates.set(contentWrapper, state);
 
@@ -339,7 +343,39 @@ export default class MermaidZoomPlugin extends Plugin {
 		this.resizeObserver?.observe(container);
 	}
 
+	// Ideal container height (border-box) so the diagram fits the full width
+	// at <= 100% scale with no extra vertical slack. Clamped to min-height.
+	private idealContentHeight(container: HTMLElement, state: ZoomState): number {
+		const cs = getComputedStyle(container);
+		const padLeft = parseFloat(cs.paddingLeft) || 0;
+		const padRight = parseFloat(cs.paddingRight) || 0;
+		const padTop = parseFloat(cs.paddingTop) || 0;
+		const padBottom = parseFloat(cs.paddingBottom) || 0;
+		const borderTop = parseFloat(cs.borderTopWidth) || 0;
+		const borderBottom = parseFloat(cs.borderBottomWidth) || 0;
+		const minHeight = parseFloat(cs.minHeight) || 0;
+
+		const availableWidth = container.clientWidth - padLeft - padRight;
+		const fitScale = Math.min(availableWidth / state.svgOriginalWidth, 1);
+		const contentHeight = state.svgOriginalHeight * fitScale;
+		return Math.max(contentHeight + padTop + padBottom + borderTop + borderBottom, minHeight);
+	}
+
+	// Auto-fit the container height to the diagram, unless the user has set a
+	// manual height by dragging the bottom edge. The >1px guard keeps this from
+	// looping with the ResizeObserver (it converges after one pass).
+	private applyFitHeight(container: HTMLElement, state: ZoomState) {
+		if (state.userResizedHeight) return;
+		const ideal = this.idealContentHeight(container, state);
+		if (Math.abs(container.offsetHeight - ideal) > 1) {
+			container.style.height = `${ideal}px`;
+		}
+	}
+
 	private fitToContainer(container: HTMLElement, contentWrapper: HTMLElement, svg: SVGSVGElement, state: ZoomState) {
+		// Auto-size the height to the content first (no-op if manually resized).
+		this.applyFitHeight(container, state);
+
 		// Get available space using the real computed padding, so a custom
 		// container padding from settings doesn't break the fit calculation.
 		const cs = getComputedStyle(container);
@@ -485,7 +521,8 @@ export default class MermaidZoomPlugin extends Plugin {
 			svg: svgClone,
 			container: modalZoomContainer,
 			svgOriginalWidth: state.svgOriginalWidth,
-			svgOriginalHeight: state.svgOriginalHeight
+			svgOriginalHeight: state.svgOriginalHeight,
+			userResizedHeight: true   // modal manages its own size; skip auto-fit-height
 		};
 
 		// Add zoom buttons
@@ -689,8 +726,8 @@ export default class MermaidZoomPlugin extends Plugin {
 			this.openFullscreenModal(state);
 		});
 
-		// Add resize handles to container (4 corners + 4 edges)
-		this.addResizeHandles(container, contentWrapper, state);
+		// Add the bottom-edge resize handle (vertical only)
+		this.addResizeHandle(container, contentWrapper, state);
 	}
 
 	private styleButton(btn: HTMLButtonElement) {
@@ -710,117 +747,53 @@ export default class MermaidZoomPlugin extends Plugin {
 		`;
 	}
 
-	private addResizeHandles(container: HTMLElement, contentWrapper: HTMLElement, state: ZoomState) {
-		// Map cursor types to CSS class names
-		const cursorClassMap: Record<string, string> = {
-			'nwse-resize': 'mermaid-zoom-resizing-nwse',
-			'nesw-resize': 'mermaid-zoom-resizing-nesw',
-			'ns-resize': 'mermaid-zoom-resizing-ns',
-			'ew-resize': 'mermaid-zoom-resizing-ew'
+	private addResizeHandle(container: HTMLElement, contentWrapper: HTMLElement, state: ZoomState) {
+		// Single bottom-edge handle: the container is only vertically resizable
+		// (drag down to make it taller). Width stays responsive (100%).
+		const handle = container.createDiv('mermaid-resize-bottom');
+		handle.style.cssText = `
+			position: absolute;
+			bottom: 0;
+			left: 0;
+			right: 0;
+			height: 8px;
+			cursor: ns-resize;
+			z-index: 50;
+		`;
+
+		let isResizing = false;
+		let startY = 0;
+		let startHeight = 0;
+
+		const onMouseDown = (e: MouseEvent) => {
+			e.preventDefault();
+			e.stopPropagation();
+			isResizing = true;
+			startY = e.clientY;
+			startHeight = container.offsetHeight;
+			document.body.addClass('mermaid-zoom-resizing-ns');
 		};
 
-		// Define resize handles: 4 corners + 4 edges
-		const handles = [
-			{ position: 'top-left', cursor: 'nwse-resize', style: 'top: 0; left: 0; width: 12px; height: 12px;' },
-			{ position: 'top-right', cursor: 'nesw-resize', style: 'top: 0; right: 0; width: 12px; height: 12px;' },
-			{ position: 'bottom-left', cursor: 'nesw-resize', style: 'bottom: 0; left: 0; width: 12px; height: 12px;' },
-			{ position: 'bottom-right', cursor: 'nwse-resize', style: 'bottom: 0; right: 0; width: 12px; height: 12px;' },
-			{ position: 'top', cursor: 'ns-resize', style: 'top: 0; left: 12px; right: 12px; height: 6px;' },
-			{ position: 'bottom', cursor: 'ns-resize', style: 'bottom: 0; left: 12px; right: 12px; height: 6px;' },
-			{ position: 'left', cursor: 'ew-resize', style: 'top: 12px; bottom: 12px; left: 0; width: 6px;' },
-			{ position: 'right', cursor: 'ew-resize', style: 'top: 12px; bottom: 12px; right: 0; width: 6px;' },
-		];
+		const onMouseMove = (e: MouseEvent) => {
+			if (!isResizing) return;
+			e.preventDefault();
+			const newHeight = Math.max(100, startHeight + (e.clientY - startY));
+			// Mark as manual so fit-to-content stops overriding the height,
+			// then re-center the diagram within the new height.
+			state.userResizedHeight = true;
+			container.style.height = `${newHeight}px`;
+			this.fitToContainer(container, contentWrapper, state.svg, state);
+		};
 
-		// Get initial margin values
-		let currentMarginLeft = 0;
-		let currentMarginTop = 0;
+		const onMouseUp = () => {
+			if (!isResizing) return;
+			isResizing = false;
+			document.body.removeClass('mermaid-zoom-resizing-ns');
+		};
 
-		handles.forEach(({ position, cursor, style }) => {
-			const handle = container.createDiv(`mermaid-resize-${position}`);
-			handle.style.cssText = `
-				position: absolute;
-				${style}
-				cursor: ${cursor};
-				z-index: 50;
-			`;
-
-			const resizeClass = cursorClassMap[cursor];
-			let isResizing = false;
-			let startX = 0;
-			let startY = 0;
-			let startWidth = 0;
-			let startHeight = 0;
-			let startMarginLeft = 0;
-			let startMarginTop = 0;
-
-			const onMouseDown = (e: MouseEvent) => {
-				e.preventDefault();
-				e.stopPropagation();
-				isResizing = true;
-				startX = e.clientX;
-				startY = e.clientY;
-				startWidth = container.offsetWidth;
-				startHeight = container.offsetHeight;
-				startMarginLeft = currentMarginLeft;
-				startMarginTop = currentMarginTop;
-				document.body.addClass(resizeClass);
-			};
-
-			const onMouseMove = (e: MouseEvent) => {
-				if (!isResizing) return;
-				e.preventDefault();
-
-				const deltaX = e.clientX - startX;
-				const deltaY = e.clientY - startY;
-
-				let newWidth = startWidth;
-				let newHeight = startHeight;
-				let newMarginLeft = startMarginLeft;
-				let newMarginTop = startMarginTop;
-
-				// Handle horizontal resize
-				if (position.includes('right')) {
-					newWidth = Math.max(150, startWidth + deltaX);
-				} else if (position.includes('left')) {
-					// Expand to the left using negative margin
-					const widthDelta = -deltaX;
-					newWidth = Math.max(150, startWidth + widthDelta);
-					if (newWidth > 150) {
-						newMarginLeft = startMarginLeft + deltaX;
-					}
-				}
-
-				// Handle vertical resize
-				if (position.includes('bottom')) {
-					newHeight = Math.max(100, startHeight + deltaY);
-				} else if (position.includes('top')) {
-					// Expand upward using negative margin
-					const heightDelta = -deltaY;
-					newHeight = Math.max(100, startHeight + heightDelta);
-					if (newHeight > 100) {
-						newMarginTop = startMarginTop + deltaY;
-					}
-				}
-
-				container.style.width = `${newWidth}px`;
-				container.style.height = `${newHeight}px`;
-				container.style.marginLeft = `${newMarginLeft}px`;
-				container.style.marginTop = `${newMarginTop}px`;
-				currentMarginLeft = newMarginLeft;
-				currentMarginTop = newMarginTop;
-			};
-
-			const onMouseUp = () => {
-				if (!isResizing) return;
-				isResizing = false;
-				document.body.removeClass(resizeClass);
-				this.resetZoom(contentWrapper, state);
-			};
-
-			handle.addEventListener('mousedown', onMouseDown);
-			document.addEventListener('mousemove', onMouseMove);
-			document.addEventListener('mouseup', onMouseUp);
-		});
+		handle.addEventListener('mousedown', onMouseDown);
+		document.addEventListener('mousemove', onMouseMove);
+		document.addEventListener('mouseup', onMouseUp);
 	}
 
 	private addWheelZoom(container: HTMLElement, contentWrapper: HTMLElement, state: ZoomState, respectModifier = true) {
@@ -965,7 +938,8 @@ export default class MermaidZoomPlugin extends Plugin {
 	}
 
 	private resetZoom(contentWrapper: HTMLElement, state: ZoomState) {
-		// Fit to container instead of just resetting to 100%
+		// Reset also drops any manual height back to fit-to-content
+		state.userResizedHeight = false;
 		this.fitToContainer(state.container, contentWrapper, state.svg, state);
 	}
 
