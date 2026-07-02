@@ -868,6 +868,9 @@ export default class MermaidZoomPlugin extends Plugin {
 		let initialDistance = 0;
 		let initialScale = 1;
 
+		// Non-passive: touchmove calls preventDefault() to own pinch/drag gestures,
+		// so the paired touchstart must also opt out of passive to silence the
+		// browser's scroll-blocking violation warning.
 		container.addEventListener('touchstart', (e) => {
 			if (e.touches.length === 2) {
 				// Pinch to zoom
@@ -884,7 +887,7 @@ export default class MermaidZoomPlugin extends Plugin {
 				state.startX = e.touches[0].clientX - state.translateX;
 				state.startY = e.touches[0].clientY - state.translateY;
 			}
-		});
+		}, { passive: false });
 
 		container.addEventListener('touchmove', (e) => {
 			e.preventDefault();
