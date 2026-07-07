@@ -1,7 +1,7 @@
 {
   "id": "mermaid-zoom",
   "name": "Mermaid Zoom",
-  "version": "1.1.12",
+  "version": "1.1.13",
   "minAppVersion": "0.15.0",
   "description": "Responsive zoom & pan for Mermaid diagrams — auto-fit, centered reset, live resize, Ctrl/Cmd scroll zoom, custom CSS.",
   "author": "Alex Ritter",

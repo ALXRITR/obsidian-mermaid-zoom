@@ -50,6 +50,13 @@ interface ZoomState {
 	userResizedHeight: boolean;
 }
 
+interface SvgBox {
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+}
+
 export default class MermaidZoomPlugin extends Plugin {
 	settings: MermaidZoomSettings = DEFAULT_SETTINGS;
 	private readonly zoomStates = new Map<HTMLElement, ZoomState>();
@@ -380,7 +387,7 @@ export default class MermaidZoomPlugin extends Plugin {
 			const width = contentBox.width + padding * 2;
 			const height = contentBox.height + padding * 2;
 
-			svg.setAttribute('viewBox', `${x} ${y} ${width} ${height}`);
+			svg.setAttribute('viewBox', `${this.formatSvgNumber(x)} ${this.formatSvgNumber(y)} ${this.formatSvgNumber(width)} ${this.formatSvgNumber(height)}`);
 			return { width, height };
 		}
 
@@ -402,11 +409,29 @@ export default class MermaidZoomPlugin extends Plugin {
 		};
 	}
 
-	private getSvgContentBox(svg: SVGSVGElement): DOMRect | undefined {
+	private getSvgContentBox(svg: SVGSVGElement): SvgBox | undefined {
+		const currentViewBox = this.getCurrentSvgViewBox(svg);
+		const elements = Array.from(svg.querySelectorAll('path, rect, circle, ellipse, polygon, polyline, line, text, foreignObject, image, use')) as SVGGraphicsElement[];
+
+		let union: SvgBox | undefined;
+		for (const element of elements) {
+			if (this.shouldIgnoreSvgContentElement(element)) continue;
+
+			const box = this.getElementSvgBox(svg, element);
+			if (!box || box.width <= 0 || box.height <= 0) continue;
+			if (this.isFullCanvasBackground(element, box, currentViewBox)) continue;
+
+			union = union ? this.unionSvgBoxes(union, box) : box;
+		}
+
+		if (union && union.width > 0 && union.height > 0) {
+			return union;
+		}
+
 		try {
 			const bbox = svg.getBBox();
 			if (bbox.width > 0 && bbox.height > 0) {
-				return bbox;
+				return { x: bbox.x, y: bbox.y, width: bbox.width, height: bbox.height };
 			}
 		} catch {
 			// getBBox can throw for detached or not-yet-rendered SVGs.
@@ -427,9 +452,105 @@ export default class MermaidZoomPlugin extends Plugin {
 		return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 	}
 
+	private getCurrentSvgViewBox(svg: SVGSVGElement): SvgBox | undefined {
+		const viewBox = svg.viewBox?.baseVal;
+		if (viewBox && viewBox.width > 0 && viewBox.height > 0) {
+			return { x: viewBox.x, y: viewBox.y, width: viewBox.width, height: viewBox.height };
+		}
+
+		const width = this.parseSvgLength(svg.getAttribute('width'));
+		const height = this.parseSvgLength(svg.getAttribute('height'));
+		if (width && height) {
+			return { x: 0, y: 0, width, height };
+		}
+
+		return undefined;
+	}
+
+	private shouldIgnoreSvgContentElement(element: SVGGraphicsElement): boolean {
+		if (element.closest('defs, marker, clipPath, mask, pattern, linearGradient, radialGradient, symbol')) {
+			return true;
+		}
+
+		const label = `${element.id} ${element.getAttribute('class') ?? ''}`;
+		if (/\b(background|canvas|diagram-background)\b/i.test(label)) {
+			return true;
+		}
+
+		const style = getComputedStyle(element);
+		return style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0;
+	}
+
+	private isFullCanvasBackground(element: SVGGraphicsElement, box: SvgBox, viewBox: SvgBox | undefined): boolean {
+		if (!viewBox || element.tagName.toLowerCase() !== 'rect') return false;
+
+		const label = `${element.id} ${element.getAttribute('class') ?? ''} ${element.parentElement?.getAttribute('class') ?? ''}`;
+		if (/\b(cluster|node|task|actor|section|label|legend)\b/i.test(label)) return false;
+
+		const coversWidth = box.width >= viewBox.width * 0.95;
+		const coversHeight = box.height >= viewBox.height * 0.95;
+		return coversWidth && coversHeight;
+	}
+
+	private getElementSvgBox(svg: SVGSVGElement, element: SVGGraphicsElement): SvgBox | undefined {
+		const ctm = svg.getScreenCTM();
+		if (ctm) {
+			const rect = element.getBoundingClientRect();
+			if (rect.width > 0 && rect.height > 0) {
+				return this.clientRectToSvgBox(svg, rect, ctm.inverse());
+			}
+		}
+
+		try {
+			const bbox = element.getBBox();
+			if (bbox.width > 0 && bbox.height > 0) {
+				return { x: bbox.x, y: bbox.y, width: bbox.width, height: bbox.height };
+			}
+		} catch {
+			// Ignore elements that cannot report a box.
+		}
+
+		return undefined;
+	}
+
+	private clientRectToSvgBox(svg: SVGSVGElement, rect: DOMRect, inverseCtm: DOMMatrix): SvgBox {
+		const point = svg.createSVGPoint();
+		const corners = [
+			[rect.left, rect.top],
+			[rect.right, rect.top],
+			[rect.right, rect.bottom],
+			[rect.left, rect.bottom]
+		].map(([x, y]) => {
+			point.x = x;
+			point.y = y;
+			return point.matrixTransform(inverseCtm);
+		});
+
+		const xs = corners.map((corner) => corner.x);
+		const ys = corners.map((corner) => corner.y);
+		const minX = Math.min(...xs);
+		const maxX = Math.max(...xs);
+		const minY = Math.min(...ys);
+		const maxY = Math.max(...ys);
+
+		return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+	}
+
+	private unionSvgBoxes(a: SvgBox, b: SvgBox): SvgBox {
+		const minX = Math.min(a.x, b.x);
+		const minY = Math.min(a.y, b.y);
+		const maxX = Math.max(a.x + a.width, b.x + b.width);
+		const maxY = Math.max(a.y + a.height, b.y + b.height);
+		return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+	}
+
+	private formatSvgNumber(value: number): string {
+		return Number.isFinite(value) ? Number(value.toFixed(3)).toString() : '0';
+	}
+
 	private lockSvgDisplaySize(svg: SVGSVGElement, size: { width: number; height: number }) {
-		svg.setAttribute('width', `${size.width}`);
-		svg.setAttribute('height', `${size.height}`);
+		svg.setAttribute('width', this.formatSvgNumber(size.width));
+		svg.setAttribute('height', this.formatSvgNumber(size.height));
 		svg.style.width = `${size.width}px`;
 		svg.style.height = `${size.height}px`;
 		svg.style.maxWidth = 'none';
