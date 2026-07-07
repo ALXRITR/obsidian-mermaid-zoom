@@ -5,6 +5,21 @@
 	display: block;
 }
 
+.mermaid-zoom-container .mermaid,
+.mermaid-zoom-container .mermaid-zoom-content {
+	width: fit-content !important;
+	min-width: 0 !important;
+	max-width: none !important;
+	overflow: visible !important;
+}
+
+.mermaid-zoom-container .mermaid-zoom-content svg,
+.mermaid-zoom-modal-wrapper svg {
+	max-width: none !important;
+	max-height: none !important;
+	overflow: visible !important;
+}
+
 /* Container and content cursor states */
 .mermaid-zoom-container {
 	cursor: grab;
