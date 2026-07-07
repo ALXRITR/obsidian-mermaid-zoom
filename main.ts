@@ -292,7 +292,7 @@ export default class MermaidZoomPlugin extends Plugin {
 		if (!targetParent) return false;
 
 		// Get SVG dimensions for initial container sizing
-		const svgSize = this.getSvgIntrinsicSize(svg);
+		const svgSize = this.getSvgContentSize(svg);
 		this.lockSvgDisplaySize(svg, svgSize);
 		const initialSvgHeight = svgSize.height || 200;
 
@@ -326,9 +326,10 @@ export default class MermaidZoomPlugin extends Plugin {
 		targetParent.insertBefore(container, targetElement);
 		contentWrapper.appendChild(targetElement);
 
-		// Use intrinsic SVG dimensions, not the current CSS box. Mermaid SVGs
-		// often render with width="100%"; measuring that CSS width makes wide
-		// notes look like the diagram itself is thousands of pixels wide.
+		// Use the actual SVG content bounds, not the current CSS box. Mermaid
+		// SVGs often render with width="100%" and can carry a viewBox with lots
+		// of empty space; measuring that makes the real diagram sit small in a
+		// corner of the zoom area.
 		const svgOriginalWidth = svgSize.width;
 		const svgOriginalHeight = svgSize.height;
 
@@ -370,7 +371,19 @@ export default class MermaidZoomPlugin extends Plugin {
 		return true;
 	}
 
-	private getSvgIntrinsicSize(svg: SVGSVGElement): { width: number; height: number } {
+	private getSvgContentSize(svg: SVGSVGElement): { width: number; height: number } {
+		const contentBox = this.getSvgContentBox(svg);
+		if (contentBox) {
+			const padding = 12;
+			const x = contentBox.x - padding;
+			const y = contentBox.y - padding;
+			const width = contentBox.width + padding * 2;
+			const height = contentBox.height + padding * 2;
+
+			svg.setAttribute('viewBox', `${x} ${y} ${width} ${height}`);
+			return { width, height };
+		}
+
 		const viewBox = svg.viewBox?.baseVal;
 		if (viewBox && viewBox.width > 0 && viewBox.height > 0) {
 			return { width: viewBox.width, height: viewBox.height };
@@ -382,20 +395,24 @@ export default class MermaidZoomPlugin extends Plugin {
 			return { width: attrWidth, height: attrHeight };
 		}
 
-		try {
-			const bbox = svg.getBBox();
-			if (bbox.width > 0 && bbox.height > 0) {
-				return { width: bbox.width, height: bbox.height };
-			}
-		} catch {
-			// getBBox can throw for detached or not-yet-rendered SVGs.
-		}
-
 		const rect = svg.getBoundingClientRect();
 		return {
 			width: rect.width || svg.clientWidth || 300,
 			height: rect.height || svg.clientHeight || 200
 		};
+	}
+
+	private getSvgContentBox(svg: SVGSVGElement): DOMRect | undefined {
+		try {
+			const bbox = svg.getBBox();
+			if (bbox.width > 0 && bbox.height > 0) {
+				return bbox;
+			}
+		} catch {
+			// getBBox can throw for detached or not-yet-rendered SVGs.
+		}
+
+		return undefined;
 	}
 
 	private parseSvgLength(value: string | null): number | undefined {
@@ -411,6 +428,8 @@ export default class MermaidZoomPlugin extends Plugin {
 	}
 
 	private lockSvgDisplaySize(svg: SVGSVGElement, size: { width: number; height: number }) {
+		svg.setAttribute('width', `${size.width}`);
+		svg.setAttribute('height', `${size.height}`);
 		svg.style.width = `${size.width}px`;
 		svg.style.height = `${size.height}px`;
 		svg.style.maxWidth = 'none';
