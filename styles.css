@@ -83,3 +83,82 @@ body.mermaid-zoom-resizing {
 	cursor: inherit !important;
 	user-select: none !important;
 }
+
+/* ============================================================================
+   SCREEN sizing (taken over from the mermaid-theme_dguv.css vault snippet).
+   PRINT sizing is owned exclusively by the pdf-export-formatting.css snippet -
+   hence the @media screen guard so these never touch the export layout.
+   ========================================================================== */
+@media screen {
+	.mermaid svg {
+		max-width: 100% !important;
+		height: auto !important;
+	}
+	.block-language-mermaid,
+	.mermaid {
+		max-width: 100% !important;
+		overflow: hidden !important;
+	}
+}
+
+/* ============================================================================
+   Mermaid label icons (merged from obsidian-mermaid-icons).
+   ========================================================================== */
+
+/* A data-URI <img> has no intrinsic pixel size, so without an explicit size it
+   collapses to 0x0 and the icon looks "missing". Applies everywhere the plugin
+   renders label icons, with or without the zoom container. */
+img.mermaid-label-icon {
+	display: inline-block;
+	width: 1.8em;
+	height: 1.8em;
+	vertical-align: middle;
+	margin-bottom: 0.3em;
+}
+
+/* Default label icon colour: brand blue, white inside a primary (filled) node.
+   The plugin bakes this var into the isolated <img>; the Icons setting injects
+   an override at runtime (see injectAppearanceCSS). */
+.mermaid .nodeLabel {
+	--mermaid-label-icon-color: #004994;
+}
+.mermaid .node.primary .nodeLabel {
+	--mermaid-label-icon-color: #ffffff;
+}
+
+/* Inline <code> icon preview in the editor. */
+.mermaid-icon-preview-inline {
+	display: inline-flex;
+	align-items: center;
+	vertical-align: middle;
+	margin-right: 4px;
+	width: 16px;
+	height: 16px;
+}
+.mermaid-icon-preview-inline svg {
+	width: 16px;
+	height: 16px;
+	display: block;
+}
+
+/* Insert-icon fuzzy-suggest modal. */
+.mermaid-icon-suggestion {
+	display: flex;
+	align-items: center;
+	justify-content: flex-start;
+}
+.mermaid-icon-suggestion-icon {
+	width: 32px;
+	height: 32px;
+	margin-right: 10px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+}
+.mermaid-icon-suggestion-text {
+	display: block;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}

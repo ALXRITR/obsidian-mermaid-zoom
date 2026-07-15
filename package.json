@@ -1,7 +1,7 @@
 {
   "name": "obsidian-mermaid-zoom",
-  "version": "1.1.15",
-  "description": "Add zoom functionality to Mermaid diagrams in Obsidian",
+  "version": "2.0.0",
+  "description": "Mermaid Toolkit: zoom & pan + label icons + theme loader for Obsidian",
   "scripts": {
     "dev": "node esbuild.config.mjs",
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production"
@@ -10,9 +10,15 @@
     "obsidian",
     "plugin",
     "mermaid",
-    "zoom"
+    "zoom",
+    "icons",
+    "theme"
   ],
   "devDependencies": {
+    "@fortawesome/fontawesome-free": "^7.3.0",
+    "@iconify-json/clarity": "^1.2.4",
+    "@iconify-json/logos": "^1.2.11",
+    "@iconify-json/lucide": "^1.2.117",
     "@types/node": "^20.10.0",
     "builtin-modules": "^3.3.0",
     "esbuild": "^0.19.0",
