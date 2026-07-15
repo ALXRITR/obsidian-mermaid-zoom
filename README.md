@@ -1,20 +1,48 @@
-# Mermaid Zoom
+# Mermaid Toolkit
 
-[English](README.md) | [简体中文](README.zh-CN.md)
+An Obsidian plugin bundling everything for Mermaid diagrams: responsive zoom &
+pan, icons inside node labels, and a vault-driven theme loader.
 
-An Obsidian plugin that adds zoom and pan functionality to Mermaid diagrams.
+> As of v2.0.0 this plugin also absorbs
+> [obsidian-mermaid-icons](https://github.com/ALXRITR/obsidian-mermaid-icons)
+> and gains a theme loader. The manifest `id` stays `obsidian-mermaid-zoom` so
+> the plugin folder, BRAT registration and existing settings keep working.
 
-![Version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fxiaozhuang0433%2Fmermaid-zoom%2Fmain%2Fmanifest.json&query=$.version&prefix=v&label=version&color=2D9CDB)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 
 ## Features
 
-- **Mouse Wheel Zoom** - Scroll over any Mermaid diagram to zoom in and out
+### Zoom & pan
+- **Mouse Wheel Zoom** - Scroll (with Ctrl/Cmd by default) over any Mermaid diagram to zoom
 - **Drag to Pan** - Click and drag to move around your diagrams
 - **Touch Gestures** - Pinch to zoom and drag to pan on mobile devices
-- **Control Buttons** - Quick access to zoom in, zoom out, and reset buttons
+- **Control Buttons** - Zoom in, zoom out, reset, fullscreen
 - **Scale Indicator** - Real-time display of current zoom level
 - **Fullscreen Mode** - Open diagrams in a modal for better viewing
+
+### Icons (merged from mermaid-icons)
+- **Label icons** - `logos:*`, `lucide:*`, `clarity:*`, custom SVG packs and
+  Font Awesome (`fa:*`) rendered inside node/edge labels
+- **Custom packs** - drop SVGs into a configurable vault folder
+  (default `_ADMIN/mermaid-icon-packs`), one pack per subfolder
+- **Insert-icon command** + inline `<code>` preview in the editor
+- **Configurable icon colour** via `--mermaid-label-icon-color`
+
+### Theme loader
+- Load a Mermaid style CSS straight from the vault
+  (`DGUV` / `uvitas` / custom path), injected for on-screen diagrams
+- Live-reloads when the style file is edited
+
+## Architecture
+
+```
+src/main.ts       Plugin bootstrap, settings load/save, CSS injection
+src/pipeline.ts   Single MutationObserver: icons -> measure -> wrap (deterministic)
+src/zoom.ts       Zoom/pan engine, fullscreen modal, resize handle
+src/icons.ts      Icon packs, label-token replacement, custom-pack loader
+src/theme.ts      Vault-driven theme CSS loader with live reload
+src/settings.ts   Settings tab + defaults
+```
 
 ## Installation
 
