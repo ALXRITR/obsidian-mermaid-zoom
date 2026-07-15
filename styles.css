@@ -5,15 +5,27 @@
 	display: block;
 }
 
+/* At rest ("native"): don't constrain anything - mermaid's own responsive
+   sizing (width:100% + max-width:<natural>px) handles every pane width.
+   Just center the diagram when the pane is wider than its natural size. */
 .mermaid-zoom-container .mermaid,
 .mermaid-zoom-container .mermaid-zoom-content {
-	width: fit-content !important;
 	min-width: 0 !important;
-	max-width: none !important;
 	overflow: visible !important;
 }
+.mermaid-zoom-container .mermaid-zoom-content svg {
+	margin-left: auto;
+	margin-right: auto;
+}
 
-.mermaid-zoom-container .mermaid-zoom-content svg,
+/* Engaged (zoom/pan active): geometry is frozen to fixed pixels, so the
+   responsive clamps must come off and the wrapper shrinks to its content. */
+.mermaid-zoom-container.is-engaged .mermaid,
+.mermaid-zoom-container.is-engaged .mermaid-zoom-content {
+	width: fit-content !important;
+	max-width: none !important;
+}
+.mermaid-zoom-container.is-engaged .mermaid-zoom-content svg,
 .mermaid-zoom-modal-wrapper svg {
 	max-width: none !important;
 	max-height: none !important;

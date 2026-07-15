@@ -42,12 +42,36 @@ interface ZoomState {
 	scaleIndicator?: HTMLElement;
 	svg: SVGSVGElement;
 	container: HTMLElement;
-	// Original SVG dimensions (saved once)
+	// Diagram dimensions used as the transform baseline. For inline diagrams
+	// these are captured lazily on engage (rendered size at rest); the modal
+	// sets them from the clone's content box.
 	svgOriginalWidth: number;
 	svgOriginalHeight: number;
 	// True once the user has dragged the bottom edge to set a manual height.
-	// While false, the container height auto-fits the diagram (fit-to-content).
 	userResizedHeight: boolean;
+	// "Native at rest": while false the plugin does not touch the diagram at
+	// all - mermaid's own responsive svg (width:100% + max-width) handles
+	// sizing, exactly as without the plugin. The first zoom/pan interaction
+	// engages: geometry is frozen (svg px-locked, container height locked) and
+	// transforms apply. Reset or a pane-width change disengages back to native.
+	engaged: boolean;
+	// Container width when engaged; a width change while engaged disengages.
+	engagedWidth: number;
+	// Untransformed svg offset inside the container content box after the
+	// freeze (e.g. .mermaid padding). Needed to compute centering translates:
+	// on-screen svg position = contentOrigin + translate + baseOffset * scale.
+	baseOffsetX: number;
+	baseOffsetY: number;
+	// Inline svg sizing snapshot taken on engage, restored on disengage.
+	savedSvg?: {
+		attrWidth: string | null;
+		attrHeight: string | null;
+		styleWidth: string;
+		styleHeight: string;
+		styleMaxWidth: string;
+		styleMaxHeight: string;
+		styleOverflow: string;
+	};
 }
 
 interface SvgBox {
@@ -116,8 +140,10 @@ export default class MermaidZoomPlugin extends Plugin {
 	}
 
 	private refitAll() {
+		// After a CSS/settings change the native layout re-flows on its own;
+		// engaged diagrams drop back to native so the new spacing applies.
 		for (const [contentWrapper, state] of this.zoomStates) {
-			this.fitToContainer(state.container, contentWrapper, state.svg, state);
+			if (state.engaged) this.disengage(contentWrapper, state);
 		}
 	}
 
@@ -197,8 +223,14 @@ export default class MermaidZoomPlugin extends Plugin {
 				const contentWrapper = container.querySelector('.mermaid-zoom-content') as HTMLElement;
 				if (!contentWrapper) continue;
 				const state = this.zoomStates.get(contentWrapper);
-				if (state) {
-					this.fitToContainer(container, contentWrapper, state.svg, state);
+				if (!state || !state.engaged) continue; // at rest: native CSS handles resizes
+				// A pane-width change while zoomed: the frozen geometry no longer
+				// matches the available space - drop back to native rather than
+				// trying to re-fit a transformed diagram (the old shrink-into-
+				// corner bug lived exactly there). Height-only changes (manual
+				// resize handle, our own height lock) are ignored.
+				if (Math.abs(container.clientWidth - state.engagedWidth) > 1) {
+					this.disengage(contentWrapper, state);
 				}
 			}
 		});
@@ -298,14 +330,11 @@ export default class MermaidZoomPlugin extends Plugin {
 
 		if (!targetParent) return false;
 
-		// Get SVG dimensions for initial container sizing
-		const svgSize = this.getSvgContentSize(svg);
-		this.lockSvgDisplaySize(svg, svgSize);
-		const initialSvgHeight = svgSize.height || 200;
-
-		// Rough initial height; fitToContainer() corrects it to fit-to-content
-		// synchronously right after the container is inserted.
-		const containerHeight = initialSvgHeight + 60;
+		// Native at rest: do NOT touch the svg here. Mermaid renders it
+		// responsive (width:100% + max-width:<natural>px) and the browser keeps
+		// it fitted to any pane width - re-implementing that in JS is what
+		// caused the shrink-into-corner resize bugs. Geometry is only frozen
+		// once the user actually zooms/pans (ensureEngaged).
 
 		// Create zoom container. Only functional/layout styles are inline here;
 		// appearance (padding, margin, background, border) comes from the
@@ -315,32 +344,23 @@ export default class MermaidZoomPlugin extends Plugin {
 			position: relative;
 			overflow: hidden;
 			width: 100%;
-			height: ${containerHeight}px;
-			min-width: 150px;
-			min-height: 100px;
 			box-sizing: border-box;
 		`;
 
-		// Create content wrapper for transformations
+		// Create content wrapper for transformations. Full width at rest so the
+		// responsive svg keeps sizing against the pane; frozen on engage.
 		const contentWrapper = container.createDiv('mermaid-zoom-content');
 		contentWrapper.style.cssText = `
 			transform-origin: 0 0;
 			transition: transform 0.1s ease-out;
-			width: fit-content;
+			width: 100%;
 		`;
 
 		// Insert container and move content inside
 		targetParent.insertBefore(container, targetElement);
 		contentWrapper.appendChild(targetElement);
 
-		// Use the actual SVG content bounds, not the current CSS box. Mermaid
-		// SVGs often render with width="100%" and can carry a viewBox with lots
-		// of empty space; measuring that makes the real diagram sit small in a
-		// corner of the zoom area.
-		const svgOriginalWidth = svgSize.width;
-		const svgOriginalHeight = svgSize.height;
-
-		// Initialize zoom state
+		// Initialize zoom state (baseline dims are captured on engage)
 		const state: ZoomState = {
 			scale: this.defaultScale,
 			minScale: this.defaultMinScale,
@@ -352,9 +372,13 @@ export default class MermaidZoomPlugin extends Plugin {
 			translateY: 0,
 			svg: svg,
 			container: container,
-			svgOriginalWidth: svgOriginalWidth,
-			svgOriginalHeight: svgOriginalHeight,
-			userResizedHeight: false
+			svgOriginalWidth: 0,
+			svgOriginalHeight: 0,
+			userResizedHeight: false,
+			engaged: false,
+			engagedWidth: 0,
+			baseOffsetX: 0,
+			baseOffsetY: 0
 		};
 		this.zoomStates.set(contentWrapper, state);
 
@@ -370,10 +394,8 @@ export default class MermaidZoomPlugin extends Plugin {
 		// Add touch gesture support
 		this.addTouchGestures(container, contentWrapper, state);
 
-		// Fit SVG to container initially
-		this.fitToContainer(container, contentWrapper, svg, state);
-
-		// Re-fit on container resize
+		// Watch for pane-width changes: while engaged they disengage back to
+		// native (see setupResizeObserver); at rest the browser handles them.
 		this.resizeObserver?.observe(container);
 		return true;
 	}
@@ -558,69 +580,86 @@ export default class MermaidZoomPlugin extends Plugin {
 		svg.style.overflow = 'visible';
 	}
 
-	// Ideal container height (border-box) so the diagram fits the full width
-	// with no extra vertical slack. Clamped to min-height.
-	private idealContentHeight(container: HTMLElement, state: ZoomState): number {
+	// Freeze the current native geometry so transforms have a stable baseline.
+	// Called by every zoom/pan entry point; no-op once engaged. At rest the
+	// diagram is fully native, so "engaged at scale 1" looks identical to rest.
+	private ensureEngaged(contentWrapper: HTMLElement, state: ZoomState) {
+		if (state.engaged) return;
+		const container = state.container;
+		const svg = state.svg;
+		const pre = svg.getBoundingClientRect();
+		if (pre.width < 2 || pre.height < 2) return; // hidden/collapsed: nothing to freeze
+
+		// Snapshot the responsive sizing so disengage can restore it exactly.
+		state.savedSvg = {
+			attrWidth: svg.getAttribute('width'),
+			attrHeight: svg.getAttribute('height'),
+			styleWidth: svg.style.width,
+			styleHeight: svg.style.height,
+			styleMaxWidth: svg.style.maxWidth,
+			styleMaxHeight: svg.style.maxHeight,
+			styleOverflow: svg.style.overflow
+		};
+
+		// Freeze: svg at its current rendered size, container at its current
+		// height (so zooming doesn't reflow the note). The is-engaged class
+		// lifts the responsive clamps (styles.css) and shrinks the wrapper to
+		// its content so transforms have a stable box.
+		this.lockSvgDisplaySize(svg, { width: pre.width, height: pre.height });
+		container.style.height = `${container.offsetHeight}px`;
+		container.addClass('is-engaged');
+
+		// The freeze can move the svg (a centered diagram snaps to the wrapper
+		// origin). Compensate via the initial translate so engaging is visually
+		// seamless, and remember the residual offset (.mermaid padding etc.)
+		// for centering math: on-screen svg = origin + translate + base*scale.
+		const post = svg.getBoundingClientRect();
+		const containerRect = container.getBoundingClientRect();
 		const cs = getComputedStyle(container);
-		const padLeft = parseFloat(cs.paddingLeft) || 0;
-		const padRight = parseFloat(cs.paddingRight) || 0;
-		const padTop = parseFloat(cs.paddingTop) || 0;
-		const padBottom = parseFloat(cs.paddingBottom) || 0;
-		const borderTop = parseFloat(cs.borderTopWidth) || 0;
-		const borderBottom = parseFloat(cs.borderBottomWidth) || 0;
-		const minHeight = parseFloat(cs.minHeight) || 0;
+		const contentLeft = containerRect.left + (parseFloat(cs.borderLeftWidth) || 0) + (parseFloat(cs.paddingLeft) || 0);
+		const contentTop = containerRect.top + (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.paddingTop) || 0);
+		state.baseOffsetX = post.left - contentLeft;
+		state.baseOffsetY = post.top - contentTop;
 
-		const availableWidth = Math.max(container.clientWidth - padLeft - padRight, 0);
-		const fitScale = Math.min(availableWidth / state.svgOriginalWidth, state.maxScale);
-		const contentHeight = state.svgOriginalHeight * fitScale;
-		return Math.max(contentHeight + padTop + padBottom + borderTop + borderBottom, minHeight);
-	}
-
-	// Auto-fit the container height to the diagram, unless the user has set a
-	// manual height by dragging the bottom edge. The >1px guard keeps this from
-	// looping with the ResizeObserver (it converges after one pass).
-	private applyFitHeight(container: HTMLElement, state: ZoomState) {
-		if (state.userResizedHeight) return;
-		const ideal = this.idealContentHeight(container, state);
-		if (Math.abs(container.offsetHeight - ideal) > 1) {
-			container.style.height = `${ideal}px`;
-		}
-	}
-
-	private fitToContainer(container: HTMLElement, contentWrapper: HTMLElement, svg: SVGSVGElement, state: ZoomState) {
-		// Auto-size the height to the content first (no-op if manually resized).
-		this.applyFitHeight(container, state);
-
-		// Get available space using the real computed padding, so a custom
-		// container padding from settings doesn't break the fit calculation.
-		const cs = getComputedStyle(container);
-		const padLeft = parseFloat(cs.paddingLeft) || 0;
-		const padRight = parseFloat(cs.paddingRight) || 0;
-		const padTop = parseFloat(cs.paddingTop) || 0;
-		const padBottom = parseFloat(cs.paddingBottom) || 0;
-		const availableWidth = Math.max(container.clientWidth - padLeft - padRight, 0);
-		const availableHeight = Math.max(container.clientHeight - padTop - padBottom, 0);
-
-		// Use saved original SVG dimensions
-		const svgWidth = state.svgOriginalWidth;
-		const svgHeight = state.svgOriginalHeight;
-
-		// Calculate scale to fit
-		const scaleX = availableWidth / svgWidth;
-		const scaleY = availableHeight / svgHeight;
-		const fitScale = Math.min(scaleX, scaleY, state.maxScale);
-
-		// Center the SVG within the available area
-		const scaledWidth = svgWidth * fitScale;
-		const scaledHeight = svgHeight * fitScale;
-		const centerX = (availableWidth - scaledWidth) / 2;
-		const centerY = (availableHeight - scaledHeight) / 2;
-
-		// Apply the scale and center
-		state.scale = fitScale;
-		state.translateX = centerX;
-		state.translateY = Math.max(0, centerY);
+		state.svgOriginalWidth = pre.width;
+		state.svgOriginalHeight = pre.height;
+		state.scale = 1;
+		state.translateX = pre.left - post.left;
+		state.translateY = pre.top - post.top;
+		state.engaged = true;
+		state.engagedWidth = container.clientWidth;
 		this.updateTransform(contentWrapper, state);
+	}
+
+	// Back to native: undo every freeze so the browser's responsive layout
+	// takes over again (identical to the plugin not touching the diagram).
+	private disengage(contentWrapper: HTMLElement, state: ZoomState) {
+		const svg = state.svg;
+		const saved = state.savedSvg;
+		if (saved) {
+			if (saved.attrWidth === null) svg.removeAttribute('width');
+			else svg.setAttribute('width', saved.attrWidth);
+			if (saved.attrHeight === null) svg.removeAttribute('height');
+			else svg.setAttribute('height', saved.attrHeight);
+			svg.style.width = saved.styleWidth;
+			svg.style.height = saved.styleHeight;
+			svg.style.maxWidth = saved.styleMaxWidth;
+			svg.style.maxHeight = saved.styleMaxHeight;
+			svg.style.overflow = saved.styleOverflow;
+			state.savedSvg = undefined;
+		}
+		state.container.style.height = '';
+		state.container.removeClass('is-engaged');
+		contentWrapper.style.transform = '';
+		state.scale = 1;
+		state.translateX = 0;
+		state.translateY = 0;
+		state.engaged = false;
+		state.engagedWidth = 0;
+		state.userResizedHeight = false;
+		if (state.scaleIndicator) {
+			state.scaleIndicator.textContent = '100%';
+		}
 	}
 
 	private openFullscreenModal(state: ZoomState) {
@@ -735,9 +774,13 @@ export default class MermaidZoomPlugin extends Plugin {
 			translateY: 0,
 			svg: svgClone,
 			container: modalZoomContainer,
-			svgOriginalWidth: state.svgOriginalWidth,
-			svgOriginalHeight: state.svgOriginalHeight,
-			userResizedHeight: true   // modal manages its own size; skip auto-fit-height
+			svgOriginalWidth: 0, // measured from the clone once it is in the DOM
+			svgOriginalHeight: 0,
+			userResizedHeight: true, // modal manages its own size
+			engaged: true, // modal geometry is always frozen; ensureEngaged no-ops
+			engagedWidth: 0,
+			baseOffsetX: 0,
+			baseOffsetY: 0
 		};
 
 		// Add zoom buttons
@@ -804,8 +847,16 @@ export default class MermaidZoomPlugin extends Plugin {
 		this.addDragPan(modalZoomContainer, modalContentWrapper, modalState);
 		this.addTouchGestures(modalZoomContainer, modalContentWrapper, modalState);
 
-		// Fit to container after modal is visible
+		// Measure + freeze the clone once it is in the DOM (getBBox needs a
+		// rendered element), then fit it into the modal. The content-box pass
+		// also tightens the clone's viewBox so empty canvas space around the
+		// actual diagram doesn't make it sit small in a corner - safe here
+		// because only the CLONE is mutated, the inline svg stays native.
 		requestAnimationFrame(() => {
+			const size = this.getSvgContentSize(svgClone);
+			this.lockSvgDisplaySize(svgClone, size);
+			modalState.svgOriginalWidth = size.width;
+			modalState.svgOriginalHeight = size.height;
 			this.fitToContainerModal(modalZoomContainer, modalContentWrapper, modalState);
 		});
 	}
@@ -899,7 +950,8 @@ export default class MermaidZoomPlugin extends Plugin {
 			text-align: center;
 		`;
 		state.scaleIndicator = scaleIndicator;
-		this.updateTransform(contentWrapper, state);
+		// At rest no transform is applied - just show the native 100%.
+		scaleIndicator.textContent = '100%';
 
 		// Fullscreen toggle button
 		const fullscreenBtn = controls.createEl('button', {
@@ -992,12 +1044,25 @@ export default class MermaidZoomPlugin extends Plugin {
 		const onMouseMove = (e: MouseEvent) => {
 			if (!isResizing) return;
 			e.preventDefault();
+			// Dragging the handle is an explicit "size the diagram" gesture:
+			// engage (no-op when already zoomed), set the new height, then fit
+			// the diagram into the box (both dimensions) and center it - so
+			// dragging smaller scales the diagram down instead of clipping it.
+			this.ensureEngaged(contentWrapper, state);
+			if (!state.engaged) return;
 			const newHeight = Math.max(100, startHeight + (e.clientY - startY));
-			// Mark as manual so fit-to-content stops overriding the height,
-			// then re-center the diagram within the new height.
 			state.userResizedHeight = true;
 			container.style.height = `${newHeight}px`;
-			this.fitToContainer(container, contentWrapper, state.svg, state);
+
+			const cs = getComputedStyle(container);
+			const availW = Math.max(container.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0), 0);
+			const availH = Math.max(container.clientHeight - (parseFloat(cs.paddingTop) || 0) - (parseFloat(cs.paddingBottom) || 0), 0);
+			if (state.svgOriginalWidth < 1 || state.svgOriginalHeight < 1) return;
+			const fit = Math.min(availW / state.svgOriginalWidth, availH / state.svgOriginalHeight, state.maxScale);
+			state.scale = fit;
+			state.translateX = Math.max(0, (availW - state.svgOriginalWidth * fit) / 2) - state.baseOffsetX * fit;
+			state.translateY = Math.max(0, (availH - state.svgOriginalHeight * fit) / 2) - state.baseOffsetY * fit;
+			this.updateTransform(contentWrapper, state);
 		};
 
 		const onMouseUp = () => {
@@ -1027,6 +1092,10 @@ export default class MermaidZoomPlugin extends Plugin {
 			e.preventDefault();
 			e.stopPropagation();
 
+			// First zoom on a resting diagram: freeze geometry as the baseline.
+			this.ensureEngaged(contentWrapper, state);
+			if (!state.engaged) return;
+
 			const rect = container.getBoundingClientRect();
 			const mouseX = e.clientX - rect.left;
 			const mouseY = e.clientY - rect.top;
@@ -1055,6 +1124,8 @@ export default class MermaidZoomPlugin extends Plugin {
 			if (e.button === 0) { // Left mouse button
 				// Prevent text/SVG selection from hijacking the drag
 				e.preventDefault();
+				this.ensureEngaged(contentWrapper, state);
+				if (!state.engaged) return;
 				state.isDragging = true;
 				state.startX = e.clientX - state.translateX;
 				state.startY = e.clientY - state.translateY;
@@ -1087,6 +1158,8 @@ export default class MermaidZoomPlugin extends Plugin {
 		// so the paired touchstart must also opt out of passive to silence the
 		// browser's scroll-blocking violation warning.
 		container.addEventListener('touchstart', (e) => {
+			this.ensureEngaged(contentWrapper, state);
+			if (!state.engaged) return;
 			if (e.touches.length === 2) {
 				// Pinch to zoom
 				const touch1 = e.touches[0];
@@ -1136,6 +1209,8 @@ export default class MermaidZoomPlugin extends Plugin {
 	}
 
 	private zoom(contentWrapper: HTMLElement, state: ZoomState, factor: number) {
+		this.ensureEngaged(contentWrapper, state);
+		if (!state.engaged) return;
 		let newScale = state.scale * factor;
 		newScale = Math.max(state.minScale, Math.min(state.maxScale, newScale));
 
@@ -1156,9 +1231,8 @@ export default class MermaidZoomPlugin extends Plugin {
 	}
 
 	private resetZoom(contentWrapper: HTMLElement, state: ZoomState) {
-		// Reset also drops any manual height back to fit-to-content
-		state.userResizedHeight = false;
-		this.fitToContainer(state.container, contentWrapper, state.svg, state);
+		// Reset = fully back to native (also drops any manual height).
+		this.disengage(contentWrapper, state);
 	}
 
 	private updateTransform(contentWrapper: HTMLElement, state: ZoomState) {
