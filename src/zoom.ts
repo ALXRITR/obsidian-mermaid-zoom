@@ -509,7 +509,7 @@ export class ZoomManager {
 		`;
 
 		const modalContentWrapper = document.createElement("div");
-		modalContentWrapper.className = "mermaid-zoom-modal-wrapper";
+		modalContentWrapper.className = "mermaid-zoom-modal-wrapper mermaid";
 		modalContentWrapper.style.cssText = `
 			transform-origin: 0 0;
 			transition: transform 0.1s ease-out;
