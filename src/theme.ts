@@ -1,4 +1,4 @@
-import { normalizePath, TAbstractFile } from "obsidian";
+import { loadMermaid, normalizePath, TAbstractFile } from "obsidian";
 import type MermaidToolkitPlugin from "./main";
 
 const THEME_STYLE_ID = "mermaid-toolkit-theme";
@@ -73,6 +73,26 @@ export class ThemeManager {
 			document.head.appendChild(this.styleEl);
 		}
 		this.styleEl.textContent = css;
+		void this.syncMermaidFont();
+	}
+
+	// Mermaid measures node/edge labels with ITS OWN configured font while our
+	// theme CSS overrides the rendered font - long labels then overflow their
+	// boxes. Align mermaid's measurement font with the theme (future renders;
+	// existing diagrams re-render on view switch).
+	private async syncMermaidFont() {
+		try {
+			const mermaid = (await loadMermaid()) as {
+				initialize(config: Record<string, unknown>): void;
+			};
+			const family =
+				getComputedStyle(document.body)
+					.getPropertyValue("--uvi-font-body")
+					.trim() || '"Source Sans 3", "Segoe UI", sans-serif';
+			mermaid.initialize({ fontFamily: family, fontSize: 14 });
+		} catch {
+			/* best-effort */
+		}
 	}
 
 	remove() {

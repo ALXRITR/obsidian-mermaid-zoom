@@ -4,6 +4,12 @@ import type { ZoomManager } from "./zoom";
 
 const MERMAID_SVG_SELECTOR = '.mermaid svg, svg[id^="mermaid-"]';
 
+// The fullscreen modal shows a CLONE of an already-wrapped diagram; it must
+// never be re-processed (re-wrapping the clone breaks the modal layout).
+function inModal(el: Element): boolean {
+	return !!el.closest(".mermaid-zoom-modal");
+}
+
 // The single processing pipeline. One MutationObserver watches for newly-added
 // Mermaid SVGs (scoped - it never full-scans the document on unrelated
 // mutations) plus workspace events. For every SVG the deterministic order is:
@@ -70,13 +76,15 @@ export class Pipeline {
 				if (!(node instanceof Element)) return;
 
 				// Newly-added Mermaid SVGs (the element itself or inside it).
-				if (node.matches(MERMAID_SVG_SELECTOR)) {
+				if (node.matches(MERMAID_SVG_SELECTOR) && !inModal(node)) {
 					this.pendingNew.add(node as unknown as SVGSVGElement);
 				}
 				node
 					.querySelectorAll<SVGSVGElement>(MERMAID_SVG_SELECTOR)
-					.forEach((s) => this.pendingNew.add(s));
-				if (node instanceof SVGSVGElement && node.closest(".mermaid")) {
+					.forEach((s) => {
+						if (!inModal(s)) this.pendingNew.add(s);
+					});
+				if (node instanceof SVGSVGElement && node.closest(".mermaid") && !inModal(node)) {
 					this.pendingNew.add(node);
 				}
 
@@ -97,7 +105,7 @@ export class Pipeline {
 		document
 			.querySelectorAll<SVGSVGElement>(MERMAID_SVG_SELECTOR)
 			.forEach((s) => {
-				if (!this.processed.has(s)) this.pendingNew.add(s);
+				if (!this.processed.has(s) && !inModal(s)) this.pendingNew.add(s);
 			});
 		if (this.pendingNew.size > 0) this.scheduleFlush();
 	}
