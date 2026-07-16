@@ -29,7 +29,7 @@ export const DEFAULT_SETTINGS: MermaidToolkitSettings = {
 	// Defaults reflect the appearance signed off by the user (transparent, tight).
 	containerPadding: "0.8em",
 	containerMargin: "0.2em",
-	containerBackground: "transparent",
+	containerBackground: "var(--mm-canvas)",
 	containerBorderRadius: "4px",
 	containerBorder: "1px solid var(--background-modifier-border)",
 	containerBorderHover: "1px solid var(--background-modifier-border)",
