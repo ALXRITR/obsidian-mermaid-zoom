@@ -10,6 +10,49 @@ function inModal(el: Element): boolean {
 	return !!el.closest(".mermaid-zoom-modal");
 }
 
+// Automatic label contrast: diagrams may bring their own classDef fills.
+// When a node surface is dark, force white label text - inline !important
+// beats the theme's colour rules and survives modal clones and export
+// serialisation. Same YIQ threshold as the uvitas-charts datalabels.
+function isDarkFill(color: string): boolean {
+	const c = color.trim().toLowerCase();
+	if (!c || c === "none" || c === "transparent") return false;
+	let r: number, g: number, b: number;
+	const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/.exec(c);
+	const rgb = /^rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/.exec(c);
+	if (hex) {
+		let h = hex[1];
+		if (h.length === 3) h = h.split("").map((x) => x + x).join("");
+		r = parseInt(h.slice(0, 2), 16);
+		g = parseInt(h.slice(2, 4), 16);
+		b = parseInt(h.slice(4, 6), 16);
+	} else if (rgb) {
+		r = +rgb[1]; g = +rgb[2]; b = +rgb[3];
+	} else {
+		return false;
+	}
+	return (0.299 * r + 0.587 * g + 0.114 * b) / 255 < 0.55;
+}
+
+export function applyLabelContrast(svg: SVGSVGElement) {
+	svg.querySelectorAll<SVGGElement>("g.node").forEach((node) => {
+		const shape = node.querySelector<SVGGraphicsElement>(
+			"rect, polygon, circle, ellipse, path",
+		);
+		if (!shape) return;
+		if (!isDarkFill(getComputedStyle(shape).fill)) return;
+		node
+			.querySelectorAll<HTMLElement>(
+				".nodeLabel, foreignObject div, foreignObject span, foreignObject p, i",
+			)
+			.forEach((el) => el.style.setProperty("color", "#ffffff", "important"));
+		node
+			.querySelectorAll<SVGElement>("text, tspan")
+			.forEach((t) => t.style.setProperty("fill", "#ffffff", "important"));
+	});
+}
+
+
 // The single processing pipeline. One MutationObserver watches for newly-added
 // Mermaid SVGs (scoped - it never full-scans the document on unrelated
 // mutations) plus workspace events. For every SVG the deterministic order is:
@@ -134,6 +177,8 @@ export class Pipeline {
 				if (!svg.isConnected) continue;
 				// (1) Icons first, so node boxes grow before geometry is measured.
 				this.icons.processLabels(svg);
+				// (1b) Contrast pass: white labels on dark custom node fills.
+				applyLabelContrast(svg);
 				// (2)+(3) Measure + wrap (wrap freezes geometry lazily on engage).
 				if (!this.zoom.hasZoomContainer(svg)) {
 					this.zoom.wrap(svg);
