@@ -73,7 +73,9 @@ export class ThemeManager {
 			document.head.appendChild(this.styleEl);
 		}
 		this.styleEl.textContent = css;
-		void this.syncMermaidFont();
+		// NOTE: syncMermaidFont() is intentionally NOT called - mermaid.initialize()
+		// REPLACES the site config and wiped Obsidian's own settings (useMaxWidth
+		// etc.), breaking diagram fitting. A merge-safe variant is in the works.
 	}
 
 	// Mermaid measures node/edge labels with ITS OWN configured font while our
