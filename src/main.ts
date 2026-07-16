@@ -74,6 +74,27 @@ export default class MermaidToolkitPlugin extends Plugin {
 				this.pipeline.rescan();
 			})();
 		});
+
+		// Live-reload the icon packs when SVGs are added/changed/removed in the
+		// pack folder (mirrors the theme file watcher) - no manual plugin
+		// reload needed after dropping a new icon into the folder.
+		let packReloadTimer: number | null = null;
+		const onPackChange = (file: { path: string }) => {
+			const folder = this.settings.iconPackFolder;
+			if (!folder || !file.path.startsWith(folder + "/")) return;
+			if (packReloadTimer !== null) window.clearTimeout(packReloadTimer);
+			packReloadTimer = window.setTimeout(() => {
+				packReloadTimer = null;
+				void (async () => {
+					await this.icons.loadCustomPacks();
+					await this.icons.registerWithMermaid();
+					this.icons.rescanLabels();
+				})();
+			}, 500);
+		};
+		this.registerEvent(this.app.vault.on("create", onPackChange));
+		this.registerEvent(this.app.vault.on("modify", onPackChange));
+		this.registerEvent(this.app.vault.on("delete", onPackChange));
 	}
 
 	async loadSettings() {
