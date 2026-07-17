@@ -294,7 +294,12 @@ export class IconManager {
 	private processLabel(labelEl: HTMLElement) {
 		if (labelEl.dataset.mermaidIconsDone === "1") return;
 		if (!this.iconTokenRegex().test(labelEl.textContent || "")) {
-			labelEl.dataset.mermaidIconsDone = "1";
+			// A `word:word` shape may be a token of a pack that has not
+			// finished loading yet (the regex only knows loaded prefixes).
+			// Leave the label unmarked so the post-load rescan retries it.
+			if (!/[\w-]+:[\w-]+/.test(labelEl.textContent || "")) {
+				labelEl.dataset.mermaidIconsDone = "1";
+			}
 			return;
 		}
 
@@ -306,6 +311,7 @@ export class IconManager {
 			""
 		).trim();
 		let added = false;
+		let unresolved = false;
 
 		const walker = document.createTreeWalker(labelEl, NodeFilter.SHOW_TEXT);
 		const textNodes: Text[] = [];
@@ -330,6 +336,7 @@ export class IconManager {
 					added = true;
 				} else {
 					frag.appendChild(document.createTextNode(m[0]));
+					unresolved = true;
 				}
 				last = m.index + m[0].length;
 			}
@@ -340,7 +347,9 @@ export class IconManager {
 		}
 
 		if (added) this.resizeLabelBox(labelEl);
-		labelEl.dataset.mermaidIconsDone = "1";
+		// A token whose pack is missing stays unresolved - do not seal the
+		// label, the rescan after the pack load must be able to retry it.
+		if (!unresolved) labelEl.dataset.mermaidIconsDone = "1";
 	}
 
 	// Mermaid sizes the node box from the label text BEFORE we inject the icon,

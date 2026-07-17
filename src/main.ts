@@ -71,6 +71,10 @@ export default class MermaidToolkitPlugin extends Plugin {
 				await this.icons.loadCustomPacks();
 				await this.icons.registerWithMermaid();
 				// Custom packs may add prefixes that were left as plain text.
+				// Diagrams rendered by the workspace restore BEFORE this point
+				// carry done-markers from a bundled-packs-only pass - clear
+				// them first, a bare pipeline.rescan() cannot heal them.
+				this.icons.rescanLabels();
 				this.pipeline.rescan();
 			})();
 		});
