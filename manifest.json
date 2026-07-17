@@ -1,7 +1,7 @@
 {
   "id": "obsidian-mermaid-zoom",
   "name": "Mermaid Toolkit",
-  "version": "2.0.9",
+  "version": "2.0.10",
   "minAppVersion": "0.15.0",
   "description": "Mermaid all-in-one: responsive zoom & pan, icons (Font Awesome, Lucide, Clarity, custom packs) in node labels, and a vault-driven theme loader (DGUV / uvitas / custom).",
   "author": "ALXRITR (uvitas)",
