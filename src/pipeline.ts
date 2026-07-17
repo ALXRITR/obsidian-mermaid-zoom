@@ -34,6 +34,28 @@ function isDarkFill(color: string): boolean {
 	return (0.299 * r + 0.587 * g + 0.114 * b) / 255 < 0.55;
 }
 
+function whitenLabelsWithin(scope: Element) {
+	scope
+		.querySelectorAll<HTMLElement>(
+			".nodeLabel, foreignObject div, foreignObject span, foreignObject p, i",
+		)
+		.forEach((el) => el.style.setProperty("color", "#ffffff", "important"));
+	scope
+		.querySelectorAll<SVGElement>("text, tspan")
+		.forEach((t) => t.style.setProperty("fill", "#ffffff", "important"));
+}
+
+// Area shapes only: bare <path> is also how mermaid draws axes/arrows (whose
+// computed fill is the black default), so paths count only when their class
+// marks them as a node surface (timeline/journey draw boxes as path.node-bkg).
+function isAreaShape(el: Element): boolean {
+	if (/^(rect|polygon|circle|ellipse)$/i.test(el.tagName)) return true;
+	return (
+		el.tagName.toLowerCase() === "path" &&
+		/(^|\s|-)(bkg|node)/i.test(el.getAttribute("class") ?? "")
+	);
+}
+
 export function applyLabelContrast(svg: SVGSVGElement) {
 	svg.querySelectorAll<SVGGElement>("g.node").forEach((node) => {
 		const shape = node.querySelector<SVGGraphicsElement>(
@@ -41,14 +63,33 @@ export function applyLabelContrast(svg: SVGSVGElement) {
 		);
 		if (!shape) return;
 		if (!isDarkFill(getComputedStyle(shape).fill)) return;
-		node
-			.querySelectorAll<HTMLElement>(
-				".nodeLabel, foreignObject div, foreignObject span, foreignObject p, i",
-			)
-			.forEach((el) => el.style.setProperty("color", "#ffffff", "important"));
-		node
-			.querySelectorAll<SVGElement>("text, tspan")
-			.forEach((t) => t.style.setProperty("fill", "#ffffff", "important"));
+		whitenLabelsWithin(node);
+	});
+
+	// Diagram types without g.node groups (timeline, journey, ...) pair an
+	// anonymous <g> holding a dark area shape with sibling text/foreignObject
+	// children. Only direct children are touched so nested lighter nodes keep
+	// their own label colour.
+	svg.querySelectorAll<SVGGElement>("g").forEach((g) => {
+		if (g.classList.contains("node") || g.closest("g.node")) return;
+		const kids = Array.from(g.children);
+		const shape = kids.find(isAreaShape) as SVGGraphicsElement | undefined;
+		if (!shape || !isDarkFill(getComputedStyle(shape).fill)) return;
+		kids.forEach((k) => {
+			const tag = k.tagName.toLowerCase();
+			if (tag === "text") {
+				(k as SVGElement).style.setProperty("fill", "#ffffff", "important");
+				k.querySelectorAll<SVGElement>("tspan").forEach((t) =>
+					t.style.setProperty("fill", "#ffffff", "important"),
+				);
+			} else if (tag === "foreignobject") {
+				whitenLabelsWithin(k);
+			} else if (tag === "g") {
+				// A nested group with its own surface owns its label colour -
+				// it gets its own pass (its fill may well be lighter).
+				if (!Array.from(k.children).some(isAreaShape)) whitenLabelsWithin(k);
+			}
+		});
 	});
 }
 
