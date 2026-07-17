@@ -107,13 +107,19 @@ body.mermaid-zoom-resizing {
 
 /* A data-URI <img> has no intrinsic pixel size, so without an explicit size it
    collapses to 0x0 and the icon looks "missing". Applies everywhere the plugin
-   renders label icons, with or without the zoom container. */
+   renders label icons, with or without the zoom container.
+   HEIGHT CAP = one text line (1.1em): Mermaid sizes the node box for the TOKEN
+   TEXT lines before we swap in the icon. Anything taller than a line makes the
+   label outgrow the pre-measured rect/foreignObject - in contexts where layout
+   is not measurable (pdf-gen export sandbox) the growth pass cannot compensate
+   and the text clips at the box bottom. 1.1em fits by construction everywhere
+   (Reading View, zoom modal, export). Width follows the icon's viewBox ratio. */
 img.mermaid-label-icon {
 	display: inline-block;
-	width: 1.8em;
-	height: 1.8em;
+	height: 1.1em;
+	width: auto;
 	vertical-align: middle;
-	margin-bottom: 0.3em;
+	margin: 0;
 }
 
 /* Default label icon colour: brand blue, white inside a primary (filled) node.
