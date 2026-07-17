@@ -1,6 +1,6 @@
 {
   "name": "obsidian-mermaid-zoom",
-  "version": "2.0.10",
+  "version": "2.0.11",
   "description": "Mermaid Toolkit: zoom & pan + label icons + theme loader for Obsidian",
   "scripts": {
     "dev": "node esbuild.config.mjs",
