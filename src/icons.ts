@@ -280,7 +280,13 @@ export class IconManager {
 		const img = document.createElement("img");
 		img.addClass("mermaid-label-icon");
 		img.src = "data:image/svg+xml," + encodeURIComponent(svgStr);
-		img.alt = `${prefix}:${name}`;
+		// MUST stay empty: caption plugins (e.g. wk-image-caption) turn any
+		// non-empty alt into a caption <div> INSIDE the mermaid label, which
+		// our pipeline observer answers with an icon re-render - an endless
+		// observer ping-pong that hard-freezes the renderer. Token lives in
+		// aria-label for accessibility/debugging instead.
+		img.alt = "";
+		img.setAttribute("aria-label", `${prefix}:${name}`);
 		return img;
 	}
 
