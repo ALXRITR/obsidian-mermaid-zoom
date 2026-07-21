@@ -56,6 +56,33 @@ function isAreaShape(el: Element): boolean {
 	);
 }
 
+// Grows the viewBox until the actual drawing fits inside it.
+//
+// Mermaid sizes the viewBox from the layout it planned; injecting icons widens
+// node boxes afterwards (a node grows around its centre), so the drawing can
+// stick out of its own box. The overflowing side is then clipped and the
+// content looks off-centre. Only ever grows - intentional padding stays.
+export function fitViewBox(svg: SVGSVGElement) {
+	const PAD = 8;
+	const vb = (svg.getAttribute("viewBox") || "").trim().split(/[\s,]+/).map(Number);
+	if (vb.length !== 4 || vb.some((n) => !isFinite(n)) || vb[2] <= 0) return;
+	let bb: DOMRect;
+	try {
+		bb = svg.getBBox();
+	} catch {
+		return; // not rendered yet
+	}
+	if (!bb || bb.width <= 0 || bb.height <= 0) return;
+	const left = Math.min(vb[0], bb.x - PAD);
+	const top = Math.min(vb[1], bb.y - PAD);
+	const right = Math.max(vb[0] + vb[2], bb.x + bb.width + PAD);
+	const bottom = Math.max(vb[1] + vb[3], bb.y + bb.height + PAD);
+	if (left === vb[0] && top === vb[1] && right === vb[0] + vb[2] && bottom === vb[1] + vb[3]) {
+		return;
+	}
+	svg.setAttribute("viewBox", `${left} ${top} ${right - left} ${bottom - top}`);
+}
+
 export function applyLabelContrast(svg: SVGSVGElement) {
 	svg.querySelectorAll<SVGGElement>("g.node").forEach((node) => {
 		const shape = node.querySelector<SVGGraphicsElement>(
@@ -218,6 +245,9 @@ export class Pipeline {
 				if (!svg.isConnected) continue;
 				// (1) Icons first, so node boxes grow before geometry is measured.
 				this.icons.processLabels(svg);
+				// (1a) Icons made the node boxes wider than mermaid planned for -
+				// re-fit the viewBox before anything measures the diagram.
+				fitViewBox(svg);
 				// (1b) Contrast pass: white labels on dark custom node fills.
 				applyLabelContrast(svg);
 				// (2)+(3) Measure + wrap (wrap freezes geometry lazily on engage).

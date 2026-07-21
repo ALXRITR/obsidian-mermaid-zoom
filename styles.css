@@ -116,7 +116,10 @@ body.mermaid-zoom-resizing {
    (Reading View, zoom modal, export). Width follows the icon's viewBox ratio. */
 img.mermaid-label-icon {
 	display: inline-block;
-	height: 1.1em;
+	/* 1.35em: gross genug, um neben dem Label als Symbol zu wirken. Fruher auf
+	   1.1em gedeckelt, weil hohere Icons die vom Layout geplante Box sprengten -
+	   das faengt jetzt fitViewBox ab (Box waechst mit dem Inhalt). */
+	height: 1.35em;
 	width: auto;
 	vertical-align: middle;
 	margin: 0;
