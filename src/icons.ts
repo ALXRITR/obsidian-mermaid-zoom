@@ -379,7 +379,26 @@ export class IconManager {
 		const newFoH = Math.max(needH, foH);
 		fo.setAttribute("width", String(newFoW));
 		fo.setAttribute("height", String(newFoH));
-		labelG?.setAttribute("transform", `translate(${-newFoW / 2}, ${-newFoH / 2})`);
+		if (shape) {
+			// Node label: its group is positioned RELATIVE to the node centre, so
+			// half the new size re-centres it.
+			labelG?.setAttribute("transform", `translate(${-newFoW / 2}, ${-newFoH / 2})`);
+		} else if (labelG) {
+			// Cluster/subgraph title: mermaid places this group at an ABSOLUTE
+			// position. Applying the node formula overwrote that and threw the
+			// title to the upper left of its box (visible as a subgraph label
+			// hanging outside the frame as soon as it carried an icon). Keep the
+			// position and only compensate for the growth, so the title stays
+			// centred over its box.
+			const m = /translate\(\s*([-\d.]+)[,\s]+([-\d.]+)\s*\)/.exec(
+				labelG.getAttribute("transform") || "",
+			);
+			if (m) {
+				const x = parseFloat(m[1]) - (newFoW - foW) / 2;
+				const y = parseFloat(m[2]) - (newFoH - foH) / 2;
+				labelG.setAttribute("transform", `translate(${x}, ${y})`);
+			}
+		}
 		if (rect) {
 			const padX = (rect.width.baseVal.value - foW) / 2;
 			const padY = (rect.height.baseVal.value - foH) / 2;
