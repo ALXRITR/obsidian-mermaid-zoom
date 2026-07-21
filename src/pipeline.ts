@@ -56,31 +56,45 @@ function isAreaShape(el: Element): boolean {
 	);
 }
 
-// Grows the viewBox until the actual drawing fits inside it.
+// Fits the viewBox to what is actually drawn - in BOTH directions.
 //
-// Mermaid sizes the viewBox from the layout it planned; injecting icons widens
-// node boxes afterwards (a node grows around its centre), so the drawing can
-// stick out of its own box. The overflowing side is then clipped and the
-// content looks off-centre. Only ever grows - intentional padding stays.
+// Mermaid sizes the box from the layout it planned; injecting icons widens node
+// boxes afterwards (a node grows around its centre), and mermaid itself leaves
+// slack (a gantt's "today" marker sits far right of the last bar). Too small a
+// box clips one side and pushes the rest off-centre; too large a box pads the
+// diagram with dead space. Trimming as well as growing keeps it centred AND
+// tight - PAD is the breathing room that survives either way.
 export function fitViewBox(svg: SVGSVGElement) {
 	const PAD = 8;
 	const vb = (svg.getAttribute("viewBox") || "").trim().split(/[\s,]+/).map(Number);
 	if (vb.length !== 4 || vb.some((n) => !isFinite(n)) || vb[2] <= 0) return;
-	let bb: DOMRect;
+	// The gantt "today" marker is a pointer, not content: when today lies outside
+	// the plotted range it sits far off to the side and would stretch the box
+	// across a wide empty gap. Measure without it.
+	const markers = Array.from(svg.querySelectorAll<SVGElement>(".today"));
+	const prevDisplay = markers.map((m) => m.style.display);
+	markers.forEach((m) => (m.style.display = "none"));
+	let bb: DOMRect | null = null;
 	try {
 		bb = svg.getBBox();
 	} catch {
-		return; // not rendered yet
+		bb = null; // not rendered yet
 	}
+	markers.forEach((m, i) => (m.style.display = prevDisplay[i]));
 	if (!bb || bb.width <= 0 || bb.height <= 0) return;
-	const left = Math.min(vb[0], bb.x - PAD);
-	const top = Math.min(vb[1], bb.y - PAD);
-	const right = Math.max(vb[0] + vb[2], bb.x + bb.width + PAD);
-	const bottom = Math.max(vb[1] + vb[3], bb.y + bb.height + PAD);
-	if (left === vb[0] && top === vb[1] && right === vb[0] + vb[2] && bottom === vb[1] + vb[3]) {
-		return;
+	const left = bb.x - PAD;
+	const top = bb.y - PAD;
+	const width = bb.width + 2 * PAD;
+	const height = bb.height + 2 * PAD;
+	if (
+		Math.abs(left - vb[0]) < 1 &&
+		Math.abs(top - vb[1]) < 1 &&
+		Math.abs(width - vb[2]) < 1 &&
+		Math.abs(height - vb[3]) < 1
+	) {
+		return; // sub-pixel churn - not worth a re-layout
 	}
-	svg.setAttribute("viewBox", `${left} ${top} ${right - left} ${bottom - top}`);
+	svg.setAttribute("viewBox", `${left} ${top} ${width} ${height}`);
 }
 
 export function applyLabelContrast(svg: SVGSVGElement) {
